@@ -1,0 +1,188 @@
+# -*- coding: utf-8 -*-
+import logging
+import pika
+import json
+
+LOG_FORMAT = ('%(levelname) -10s %(asctime)s %(name) -30s %(funcName) '
+              '-35s %(lineno) -5d: %(message)s')
+LOGGER = logging.getLogger(__name__)
+
+
+class ExamplePublisher(object):
+    """
+	Problemas com o canal e a conexão são tratados aqui.
+    """
+    EXCHANGE = 'message'
+    EXCHANGE_TYPE = 'topic'
+    PUBLISH_INTERVAL = 1
+    QUEUE = 'text'
+    ROUTING_KEY = 'example.text'
+    
+
+    def __init__(self):
+        """Setup the example publisher object, passing in the URL we will use
+        to connect to RabbitMQ.
+
+        """
+        self._connection = None
+        self._channel = None
+        self._deliveries = []
+        self._acked = 0
+        self._nacked = 0
+        self._message_number = 0
+        self._stopping = False
+        self._closing = False
+        self._url_offset = 0
+
+    def connect(self):
+        """
+	   Esse metodo conecta ao RabbitMQ, retornando a conexão.	
+	"""
+       parametros = pika.BlockingConnection(pika.ConnectionParameters('192.168.0.104'))	
+       return parametros 
+
+    def close_connection(self):
+        """Fecha a conexao com o RabbitMQ"""
+        LOGGER.info('FECHANDO A CONEXAO')
+        self._closing = True
+        self._connection.close()
+
+
+    def add_on_connection_close_callback(self):
+        """
+	Caso feche de forma inesperada, chama o callback
+        """
+        LOGGER.info('ADICIONANDO CONEXAO, CHAMANDO CALLBACK')
+        self._connection.add_on_close_callback(self.on_connection_closed)
+
+
+    def on_connection_closed(self, connection, reply_code, reply_text):
+        self._channel = None
+        if self._closing:
+            self._connection.ioloop.stop()
+        else:
+            LOGGER.warning('Fechando conexao, reabrindo em 5 segundos: (%s) %s', reply_code, reply_text)
+            self._connection.add_timeout(5, self.reconnect)
+
+    def on_connection_open(self, unused_connection):
+        LOGGER.info('CONEXAO ABERTA')
+        self.add_on_connection_close_callback()
+        self.open_channel()
+
+    def reconnect(self):
+        
+	# This is the old connection IOLoop instance, stop its ioloop
+        self._connection.ioloop.stop()
+
+        # Create a new connection
+        self._connection = self.connect()
+
+        # There is now a new connection, needs a new ioloop to run
+        self._connection.ioloop.start()
+
+    def add_on_channel_close_callback(self):
+        LOGGER.info('Adding channel close callback')
+        self._channel.add_on_close_callback(self.on_channel_closed)
+
+    def on_channel_closed(self, channel, reply_code, reply_text):
+        LOGGER.warning('CANAL FOI FECHADO: (%s) %s', reply_code, reply_text)
+        self._deliveries = []
+        self._message_number = 0
+        if not self._closing:
+            self._connection.close()
+
+    def on_channel_open(self, channel):
+        LOGGER.info('CANAL ABERTO')
+        self._channel = channel
+        self.add_on_channel_close_callback()
+        self.setup_exchange(self.EXCHANGE)
+
+    def setup_exchange(self, exchange_name):
+        LOGGER.info('Declaring exchange %s', exchange_name)
+        self._channel.exchange_declare(self.on_exchange_declareok, exchange_name, self.EXCHANGE_TYPE)
+
+    def on_exchange_declareok(self, unused_frame):
+        LOGGER.info('Exchange declared')
+        self.setup_queue(self.QUEUE)
+
+    def setup_queue(self, queue_name):
+        LOGGER.info('Declaring queue %s', queue_name)
+        self._channel.queue_declare(self.on_queue_declareok, queue_name)
+
+    def on_queue_declareok(self, method_frame):
+        LOGGER.info('EXCHANGE %s A FILA %s COM %s (CHAVE DE ROTEAMENTO)', self.EXCHANGE, self.QUEUE, self.ROUTING_KEY)
+        self._channel.queue_bind(self.on_bindok, self.QUEUE, self.EXCHANGE, self.ROUTING_KEY)
+
+    def on_delivery_confirmation(self, method_frame):
+        confirmation_type = method_frame.method.NAME.split('.')[1].lower()
+        LOGGER.info('Received %s for delivery tag: %i', confirmation_type, method_frame.method.delivery_tag)
+        if confirmation_type == 'ack':
+            self._acked += 1
+        elif confirmation_type == 'nack':
+            self._nacked += 1
+        self._deliveries.remove(method_frame.method.delivery_tag)
+        LOGGER.info('Published %i messages, %i have yet to be confirmed, ' '%i were acked and %i were nacked', self._message_number, len(self._deliveries), self._acked, self._nacked)
+
+    def enable_delivery_confirmations(self):
+        self._channel.confirm_delivery(self.on_delivery_confirmation)
+
+    def publish_message(self):
+        if self._stopping:
+            return
+
+        message = {'A': B, 'C': D}
+        properties = pika.BasicProperties(app_id='example-publisher', content_type='text/plain', headers=message)
+
+        self._channel.basic_publish(self.EXCHANGE, self.ROUTING_KEY, json.dumps(message, ensure_ascii=False), properties)
+        self._message_number += 1
+        self._deliveries.append(self._message_number)
+        LOGGER.info('PUBLICAR A MENSAGEM # %i', self._message_number)
+        self.schedule_next_message()
+
+    def schedule_next_message(self):
+        if self._stopping:
+            return
+        self._connection.add_timeout(self.PUBLISH_INTERVAL, self.publish_message)
+
+    def start_publishing(self):
+        LOGGER.info('START PUBLISHING')
+        self.enable_delivery_confirmations()
+        self.schedule_next_message()
+
+    def on_bindok(self, unused_frame):
+        LOGGER.info('FILA LIMITADA')
+        self.start_publishing()
+
+    def close_channel(self):
+        LOGGER.info('Closing the channel')
+        if self._channel:
+            self._channel.close()
+
+    def open_channel(self):
+        LOGGER.info('Creating a new channel')
+        self._connection.channel(on_open_callback=self.on_channel_open)
+
+    def run(self):
+        self._connection = self.connect()
+        self._connection.ioloop.start()
+
+    def stop(self):
+        LOGGER.info('PARANDO')
+        self._stopping = True
+        self.close_channel()
+        self.close_connection()
+        self._connection.ioloop.start()
+        LOGGER.info('PAROU')
+
+def main():
+    logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
+
+    example = ExamplePublisher()
+    try:
+        example.run()
+    except KeyboardInterrupt:
+        example.stop()
+
+if __name__ == '__main__':
+    main()
+
