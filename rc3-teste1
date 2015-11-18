@@ -21,7 +21,7 @@ myaddr   = 'amqp://{0}/frcp.{1}'.format(server, myid)
 
 #-------------------------------------------------------------------------------
 # Conexão AMQP
-#Credencials encapsula toda a informação de autenticação da classe ConnectionParameters.
+# Credencials encapsula toda a informação de autenticação da classe ConnectionParameters.
 credentials = pika.PlainCredentials(username, passwd) #Retorna o formato correto de user e passwd para a conexao.
 parameters  = pika.ConnectionParameters(server, port, vhost, credentials)
 connection  = pika.BlockingConnection(parameters)
@@ -48,11 +48,11 @@ def subscribe_topic(name):
 # Criar as callbacks para tratar as mensagens
 
 def omfrc_cb(ch, method, properties, body):
-           #rc3 'o.op':corpo da mensagem
+        	          #rc3 'o.op':corpo da mensagem
     print "[%s] %r:%r" % (myid, method.routing_key, body)
     msg = json.loads(body)
 
-    # Ignorar mensagens enviadas por mim mesmo.
+    # Ignorar mensagens enviadas por mim mesmo
     if msg['src'] == myaddr :
         return
     	    
@@ -94,7 +94,6 @@ def omfrc_cb(ch, method, properties, body):
         }
 
         resp = json.dumps(resp)
-        #print resp
 
         channel.basic_publish(exchange=myid,
                               routing_key='o.info',
@@ -130,110 +129,20 @@ def omfrc_cb(ch, method, properties, body):
                               body=resp,
                               properties=pika.BasicProperties(content_type='text/json'))
 
-
-
-#*********************REQUEST**************************
-#VERIFICAR SE AS MENSAGENS ENVIADAS SÃO ESSAS.
-
-    if msg['op'] == 'request' and msg['props'] and msg['props']['membership']:
-        patt = 'amqp://[^/]+/frcp.(.+)'
-	
-	print '---------------------------------------------------'	
-	print '**REQUEST**'
-        m = re.search(patt, msg['src'])
-        src = m.group(1)
-	print '[%s] source: %s' % (myid, src)
-        
-	m = re.search(patt, msg['props']['membership'])
-        topic = m.group(1)
-        print '[%s] membership: %s' % (myid, topic)
-	print '---------------------------------------------------'
-
-	# 1) O EC recebe as informações das propriedades listadas no <props> da mensagem de requisição.
-	# 2) Segue a mesma sintaxe do inform da mensagem de configure.
-	# 3) Replyto para o meu próprio tópico. 
-	# 	
-	resp = {
-            'src'     : myaddr,
-            'cid'     : msg['mid'],
-            'op'      : 'inform',
-            'mid'     : str(uuid.uuid4()),
-            'ts'      : msg['ts'],
-            'replyto' : myid,
-            'itype'   : 'STATUS',
-            'props'   : {
-                'membership' : [],
-                'res_index'  : msg['props']['res_index'] # ou res_id 
-            }
-        }
-
-        resp = json.dumps(resp)
-
-        channel.basic_publish(exchange=myid,
-                              routing_key='o.info',
-                              body=resp,
-                              properties=pika.BasicProperties(content_type='text/json'))
-
-	# 4) Se inscrever no exchange a pedido do EC e informá-lo.
-	#      	
-	q = subscribe_topic(topic)
-        channel.basic_consume(omfrc_cb, queue=q)
-
-        resp = {
-            'src'   : myaddr,
-            'type'  : 'node',
-            'itype' : 'STATUS',
-            'op'    : 'inform',
-            'mid'   : str(uuid.uuid4()),
-            'ts'    : msg['ts'],
-            'props' : {
-                'membership' : [ msg['props']['membership'] ]
-            }
-        }
-
-        resp = json.dumps(resp)
-        channel.basic_publish(exchange=myid,
-                              routing_key='o.info',
-                              body=resp,
-                              properties=pika.BasicProperties(content_type='text/json'))
-
-
-	# 5) Replyto para outro tópico a pedido do EC.
-	#	
-        resp = {
-            'src'     : myaddr,
-            'type'    : 'node',
-            'replyto' : msg['replyto'],
-            'itype'   : 'STATUS',
-            'op'      : 'inform',
-            'mid'     : str(uuid.uuid4()),
-            'ts'      : msg['ts'],
-            'props'   : {
-                'membership' : [ msg['props']['membership'] ]
-            }
-        }
-
-        resp = json.dumps(resp)
-        channel.basic_publish(exchange=myid,
-                              routing_key='o.info',
-                              body=resp,
-                              properties=pika.BasicProperties(content_type='text/json'))	
-
-
-
-
-
 #*********************CREATE**************************
-# JsonMessage: {:src=>amqp://omf-ec/frcp.omf-rc1, :cid=>"783fe895-0ec9-4dad-a5ac-978ff6819151", :op=>:inform, 
-# :mid=>"547f0084-ecc0-4107-b853-59e3d957d976", :ts=>1442954309, 
-# :props=>{:res_id=>"amqp://omf-ec/frcp.bb5465d9-6f95-40f9-9494-fd59c8eacd0e", 
-#	   :uid=>"bb5465d9-6f95-40f9-9494-fd59c8eacd0e", 
-#	   :binary_path=>"/home/user/foo", 
-#	   :hrn=>"aac46854-99b9-4c10-8ab0-7b428aa723a2", 
-#	   :membership=>[], :type=>"application", 
-#	   :address=>"amqp://omf-ec/frcp.bb5465d9-6f95-40f9-9494-fd59c8eacd0e"}, 
-#	   :replyto=>"omf-rc1", :itype=>"CREATION.OK"}
-#
+	# JsonMessage: {:src=>amqp://omf-ec/frcp.omf-rc1, :cid=>"783fe895-0ec9-4dad-a5ac-978ff6819151", :op=>:inform, 
+	# :mid=>"547f0084-ecc0-4107-b853-59e3d957d976", :ts=>1442954309, 
+	# :props=>{:res_id=>"amqp://omf-ec/frcp.bb5465d9-6f95-40f9-9494-fd59c8eacd0e", 
+	#	   :uid=>"bb5465d9-6f95-40f9-9494-fd59c8eacd0e", 
+	#	   :binary_path=>"/home/user/foo", 
+	#	   :hrn=>"aac46854-99b9-4c10-8ab0-7b428aa723a2", 
+	#	   :membership=>[], :type=>"application", 
+	#	   :address=>"amqp://omf-ec/frcp.bb5465d9-6f95-40f9-9494-fd59c8eacd0e"}, 
+	#	   :replyto=>"omf-rc1", :itype=>"CREATION.OK"}
+	#
+
+# O inform gerado após uma mensagem create pode ter 2 formatos de itype: CREATION.OK e CREATION.FAIL. 
+# Estou assumindo que a criação foi bem sucedida, a única mensagem que estou enviando é CREATION.OK
 
     if msg['op'] == 'create' and msg['props'] and msg['props']['membership']:
 	patt = 'amqp://[^/]+/frcp.(.+)'
@@ -264,7 +173,7 @@ def omfrc_cb(ch, method, properties, body):
 		'hrn'	     : [ msg['props']['hrn'] ],
 	        'membership' : [ msg['props']['membership'] ],
 	        'type'       : [ msg['props']['type'] ],
-		'adress'     : 'uid'
+		'adress'     : 'amqp://[^/]+/frcp.'+'uid'
 	    }
 	}
 
